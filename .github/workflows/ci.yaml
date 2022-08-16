@@ -5,8 +5,6 @@ on:
     branches: [ main ]
     tags: [ '*' ]
   pull_request:
-  schedule:
-    - cron: '30 2 */10 * *'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -15,12 +13,6 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-
-    container:
-      image: kalilinux/kali-rolling:latest
-      volumes:
-        - /proc:/proc
-      options: --privileged
 
     steps:
       #- name: Maximize build space
@@ -41,23 +33,29 @@ jobs:
 
       - name: Install dependencies
         run: |
-          apt update
-          apt install -y git live-build simple-cdd cdebootstrap curl procps
-          git clone https://gitlab.com/kalilinux/build-scripts/live-build-config.git ${LB}
+          sudo apt-get update
+          sudo apt-get full-upgrade -y
+          wget https://http.kali.org/pool/main/k/kali-archive-keyring/kali-archive-keyring_2022.1_all.deb
+          wget https://http.kali.org/kali/pool/main/l/live-build/live-build_20220505_all.deb
+                    
+          sudo apt-get install -y git live-build simple-cdd debootstrap cdebootstrap curl
+          sudo dpkg -i kali-archive-keyring_2022.1_all.deb
+          sudo dpkg -i live-build_20220505_all.deb
+          
+          cd /usr/share/debootstrap/scripts/
+          (echo "default_mirror http://http.kali.org/kali"; sed -e "s/debian-archive-keyring.gpg/kali-archive-keyring.gpg/g" sid) > /tmp/kali
+          sudo mv /tmp/kali .
+          sudo rm -rf kali-rolling
+          sudo ln -s kali kali-rolling
 
       - name: Create live-build directory structure
         run: |
-          cd ${LB}
-          lb config --distribution kali-rolling -- --variant xfce
-
-      - name: Adjust live-build configuration
-        run: |
-          cp -vr ${REPO}/config/* ${LB}/config/
+          git clone https://gitlab.com/kalilinux/build-scripts/live-build-config.git
 
       - name: Building
+        working-directory: live-build-config
         run: |
-          cd ${LB}
-          lb build
+          ./build.sh --verbose
 
       - name: Uploading ISO
         uses: actions/upload-artifact@v3
