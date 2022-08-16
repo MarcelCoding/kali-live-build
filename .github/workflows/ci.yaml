@@ -1,0 +1,97 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ '*' ]
+  pull_request:
+  schedule:
+    - cron: '30 2 */10 * *'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    container:
+      image: kalilinux/kali-rolling:latest
+      volumes:
+        - /proc:/proc
+      options: --privileged
+
+    steps:
+      #- name: Maximize build space
+      #  uses: easimon/maximize-build-space@master
+      #  with:
+      #    root-reserve-mb: 512
+      #    swap-size-mb: 1024
+      #    remove-dotnet: 'true'
+      #    remove-android: 'true'
+      #    remove-haskell: 'true'
+
+      - uses: actions/checkout@v3
+
+      - name: Set environment variables
+        run: |
+          echo REPO=$(pwd) >> ${GITHUB_ENV}
+          echo LB=$(pwd)/live-build >> ${GITHUB_ENV}
+
+      - name: Install dependencies
+        run: |
+          apt update
+          apt install -y git live-build simple-cdd cdebootstrap curl procps
+          git clone https://gitlab.com/kalilinux/build-scripts/live-build-config.git ${LB}
+
+      - name: Create live-build directory structure
+        run: |
+          cd ${LB}
+          lb config --distribution kali-rolling -- --variant xfce
+
+      - name: Adjust live-build configuration
+        run: |
+          cp -vr ${REPO}/config/* ${LB}/config/
+
+      - name: Building
+        run: |
+          cd ${LB}
+          lb build
+
+      - name: Uploading ISO
+        uses: actions/upload-artifact@v3
+        with:
+          name: kali-amd64.iso
+          path: ${{ env.LB }}/kali-linux-rolling-live-amd64.hybrid.iso
+          if-no-files-found: error
+
+      - name: Mount ISO to extract required files (filesystem.squashfs, vmlinuz, initrd.img)
+        run: |
+          mkdir ${LB}/tmp/
+          mount -o loop ${LB}/kali-linux-rolling-live-amd64.hybrid.iso ${LB}/tmp
+
+      - name: Uploading vmlinuz
+        uses: actions/upload-artifact@v3
+        with:
+          name: vmlinuz
+          path: |
+            ${{ env.LB }}/tmp/live/vmlinuz
+          if-no-files-found: error
+
+      - name: Uploading initrd.img
+        uses: actions/upload-artifact@v3
+        with:
+          name: initrd.img
+          path: |
+            ${{ env.LB }}/tmp/live/initrd.img
+          if-no-files-found: error
+
+      - name: Uploading filesystem.squashfs
+        uses: actions/upload-artifact@v3
+        with:
+          name: filesystem.squashfs
+          path: |
+            ${{ env.LB }}/tmp/live/filesystem.squashfs
+          if-no-files-found: error
+
